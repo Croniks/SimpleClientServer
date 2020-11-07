@@ -5,13 +5,22 @@ using System.Text;
 using System.Net;
 using System.Net.Sockets;
 using System.Reflection;
+using System.Text.Json;
 
 
 namespace Client
 {
+    enum ErrorType { RandomServerError = 1}
+    enum RequestType { Message, WaitingError }
     enum MenuOptionKey { OpeningMainMenu = 1, ReturnToMainMenu = 2 }
-    enum Command { SendMessage = ConsoleKey.D1, GetRandomError = ConsoleKey.D2, ExitProgramm = ConsoleKey.D3 }
+    enum Command { SendMessage = ConsoleKey.A, GetRandomError = ConsoleKey.D2, ExitProgramm = ConsoleKey.Q }
     
+    class ErrorInfo
+    {
+        public int ErrorType { get; set; }
+        public string ErrorMessage { get; set; }
+    }
+
     class Client
     {
         private IPEndPoint _ipPoint;
@@ -26,8 +35,11 @@ namespace Client
         
         public Client(int port, string adress)
         {
+            _port = port;
+            _adress = adress;
+
             CreateCommandsDictionary();
-            GetUserCommand(MenuOptionKey.OpeningMainMenu);
+            GetUserCommand();
         }
 
         private void CreateCommandsDictionary()
@@ -53,14 +65,15 @@ namespace Client
 
         public void SendMessage()
         {
-            Console.WriteLine("This is \"SendMessage\" method worked");
-            GetUserCommand(MenuOptionKey.OpeningMainMenu);
+            Console.Write("Введите сообщение, которое вы хотите послать на сервер: ");
+            string message = Console.ReadLine();
+
+            RequestServer(message, RequestType.Message);
         }
         
         public void GetRandomError()
         {
-            Console.WriteLine("This is \"GetRandomError\" method worked");
-            GetUserCommand(MenuOptionKey.OpeningMainMenu);
+            RequestServer("error", RequestType.WaitingError);
         }
 
         public void ExitProgramm()
@@ -74,9 +87,9 @@ namespace Client
             {
                 case MenuOptionKey.OpeningMainMenu:
                     Console.WriteLine("Добро пожаловать в главное меню: ");
-                    Console.WriteLine($" - для отправки сообщения на сервер нажмите - \"{(char)(ConsoleKey)Command.SendMessage}\"");
-                    Console.WriteLine($" - для получения случайной ошибки с сервера нажмите - \"{(char)(ConsoleKey)Command.GetRandomError}\"");
-                    Console.WriteLine($" - для выхода из приложения нажмите - \"{(char)(ConsoleKey)Command.ExitProgramm}\"");
+                    Console.WriteLine($" - для отправки сообщения на сервер нажмите - \"{(char)Command.SendMessage}\"");
+                    Console.WriteLine($" - для получения случайной ошибки с сервера нажмите - \"{(char)Command.GetRandomError}\"");
+                    Console.WriteLine($" - для выхода из приложения нажмите - \"{(char)Command.ExitProgramm}\"");
                     break;
                 case MenuOptionKey.ReturnToMainMenu:
                     Console.WriteLine("/t- для возврата в главное меню нажмите - \"E\"");
@@ -84,19 +97,21 @@ namespace Client
                     break;
             }
         }
-
-        private void GetUserCommand(MenuOptionKey menuOption)
+        
+        private void GetUserCommand()
         {
-            PrintMenu(menuOption);
-            ConsoleKeyInfo keyInfo = Console.ReadKey(true);
+            PrintMenu(MenuOptionKey.OpeningMainMenu);
 
-            if (_commands.ContainsKey(keyInfo.Key))
+            while (true)
             {
-                _commands[keyInfo.Key].Invoke();
-            }
-            else
-            {
-                GetUserCommand(0);
+                ConsoleKeyInfo keyInfo = Console.ReadKey(true);
+
+                if (_commands.ContainsKey(keyInfo.Key))
+                {
+                    _commands[keyInfo.Key].Invoke();
+                }
+
+                PrintMenu(MenuOptionKey.OpeningMainMenu);
             }
         }
 
@@ -104,33 +119,57 @@ namespace Client
         {
             if(port != default && !string.IsNullOrEmpty(adress))
             {
-                _ipPoint = new IPEndPoint(IPAddress.Parse(address), port);
+                _ipPoint = new IPEndPoint(IPAddress.Parse(adress), port);
                 _socket = new Socket(AddressFamily.InterNetwork, SocketType.Stream, ProtocolType.Tcp);
                 return true;
             }
-            
+            else
+            {
+                Console.WriteLine("Неверное имя порта или адрес!");
+            }   
+
             return false;
         }
 
-        private void RequestServer()
+        private void RequestServer(string message, RequestType requestType)
         {
-            if(_socket == null)
+            if(!CreateSocket(_port, _adress))
             {
-                CreateSocket(_port, _adress);
+                return;
             }
             
             _socket.Connect(_ipPoint);
-            string message = Console.ReadLine();
 
-            //if (message.Trim()[0])
-                // Запрос к словарю
-            
             byte[] data = Encoding.Unicode.GetBytes(message);
             _socket.Send(data);
-        }
 
-       
-       
+            if (requestType == RequestType.WaitingError)
+            {
+
+                data = new byte[256]; 
+                StringBuilder builder = new StringBuilder();
+                int bytes = 0; // количество полученных байт
+
+                do
+                {
+                    bytes = _socket.Receive(data, data.Length, 0);
+                    builder.Append(Encoding.Unicode.GetString(data, 0, bytes));
+                }
+                while (_socket.Available > 0);
+            
+            
+                ErrorInfo errorInfo = JsonSerializer.Deserialize<ErrorInfo>(builder.ToString());
+
+                if ((ErrorType)errorInfo.ErrorType == ErrorType.RandomServerError)
+                {
+                    Console.WriteLine(errorInfo.ErrorMessage);
+                }
+            }
+            
+            // закрываем сокет
+            _socket.Shutdown(SocketShutdown.Both);
+            _socket.Close();
+        }
         
         // адрес и порт сервера, к которому будем подключаться
         static int port = 8005; // порт сервера
@@ -139,43 +178,6 @@ namespace Client
         static void Main(string[] args)
         {
             Client client = new Client(8005, "127.0.0.1");
-
-
-
-            //try
-            //{
-            //    IPEndPoint ipPoint = new IPEndPoint(IPAddress.Parse(address), port);
-
-            //    Socket socket = new Socket(AddressFamily.InterNetwork, SocketType.Stream, ProtocolType.Tcp);
-
-            //    // подключаемся к удаленному хосту
-            //    socket.Connect(ipPoint);
-            //    Console.Write("Введите сообщение:");
-            //    string message = Console.ReadLine();
-            //    byte[] data = Encoding.Unicode.GetBytes(message);
-            //    socket.Send(data);
-
-            //    // получаем ответ
-            //    data = new byte[256]; // буфер для ответа
-            //    StringBuilder builder = new StringBuilder();
-            //    int bytes = 0; // количество полученных байт
-
-            //    do
-            //    {
-            //        bytes = socket.Receive(data, data.Length, 0);
-            //        builder.Append(Encoding.Unicode.GetString(data, 0, bytes));
-            //    }
-            //    while (socket.Available > 0);
-            //    Console.WriteLine("ответ сервера: " + builder.ToString());
-
-            //    // закрываем сокет
-            //    socket.Shutdown(SocketShutdown.Both);
-            //    socket.Close();
-            //}
-            //catch (Exception ex)
-            //{
-            //    Console.WriteLine(ex.Message);
-            //}
         }
     }
 }

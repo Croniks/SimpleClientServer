@@ -2,10 +2,20 @@
 using System.Text;
 using System.Net;
 using System.Net.Sockets;
+using System.Text.Json;
 
 
 namespace Server
 {
+    enum ErrorType { RandomServerError = 1 }
+    enum RequestType { Message, WaitingError }
+
+    class ErrorInfo
+    {
+        public int ErrorType { get; set; }
+        public string ErrorMessage { get; set; }
+    }
+
     class Server
     {
         // порт для приема входящих запросов
@@ -44,13 +54,23 @@ namespace Server
                         builder.Append(Encoding.Unicode.GetString(data, 0, bytes));
                     }
                     while (handler.Available > 0);
-
-                    Console.WriteLine(DateTime.Now.ToShortTimeString() + ": " + builder.ToString());
                     
-                    // отправляем ответ
-                    string message = "ваше сообщение доставлено";
-                    data = Encoding.Unicode.GetBytes(message);
-                    handler.Send(data);
+                    if(!builder.ToString().Equals("error"))
+                    {
+                        Console.WriteLine(DateTime.Now.ToShortTimeString() + ": " + builder.ToString());
+                    }
+                    else
+                    { 
+                        // отправляем ответ
+                        string message = JsonSerializer.Serialize(new ErrorInfo(){
+                            ErrorMessage = "Случайная ошибка от сервера!",
+                            ErrorType = (int)ErrorType.RandomServerError
+                        });
+                        
+                        data = Encoding.Unicode.GetBytes(message);
+                        handler.Send(data);
+                    }
+                    
                     // закрываем сокет
                     handler.Shutdown(SocketShutdown.Both);
                     handler.Close();
